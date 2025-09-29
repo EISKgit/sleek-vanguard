@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -8,7 +9,7 @@ import { Ship, ArrowLeft, Send, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 interface Message {
-  sender: "user" | "bot";
+  sender: "user" | "bot" | "receptionist";
   text: string;
 }
 
@@ -22,13 +23,11 @@ const Chat = () => {
   const [step, setStep] = useState("name");
   const [attempts, setAttempts] = useState(0);
   const [isTyping, setIsTyping] = useState(false);
+  const [typingSender, setTypingSender] = useState<"bot" | "receptionist">("bot");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(scrollToBottom, [messages, isTyping]);
+  const backendUrl = "http://127.0.0.1:8000/api/chatbot_ml/";
+  const receptionistUrl = "http://127.0.0.1:8000/api/titanic_receptionist/";
 
   const stepPrompts: Record<string, string> = {
     name: "What's your name?",
@@ -41,6 +40,12 @@ const Chat = () => {
     embarked: "What is your port of embarkation? (C, Q, S)"
   };
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(scrollToBottom, [messages, isTyping]);
+
   const resetChat = (msg = "Too many invalid attempts. Let's start over.") => {
     setMessages([{ sender: "bot", text: msg }]);
     setInput("");
@@ -50,131 +55,159 @@ const Chat = () => {
     toast.info("Chat reset");
   };
 
-  const validateInput = (currentStep: string, value: string): { valid: boolean; error: string } => {
-    switch (currentStep) {
-      case "pclass":
-        const pclass = parseInt(value);
-        if (![1, 2, 3].includes(pclass)) {
-          return { valid: false, error: "Please enter 1, 2, or 3 for class." };
-        }
-        break;
-      case "sex":
-        if (!["male", "female"].includes(value.toLowerCase())) {
-          return { valid: false, error: "Please enter 'male' or 'female'." };
-        }
-        break;
-      case "age":
-        if (isNaN(parseFloat(value)) || parseFloat(value) < 0) {
-          return { valid: false, error: "Please enter a valid positive number for age." };
-        }
-        break;
-      case "sibsp":
-      case "parch":
-        if (isNaN(parseInt(value)) || parseInt(value) < 0) {
-          return { valid: false, error: "Please enter a valid non-negative integer." };
-        }
-        break;
-      case "fare":
-        if (isNaN(parseFloat(value)) || parseFloat(value) < 0) {
-          return { valid: false, error: "Please enter a valid positive fare amount." };
-        }
-        break;
-      case "embarked":
-        if (!["C", "Q", "S"].includes(value.toUpperCase())) {
-          return { valid: false, error: "Please enter C, Q, or S." };
-        }
-        break;
-    }
-    return { valid: true, error: "" };
-  };
-
   const handleUserInput = async () => {
     if (!input.trim()) return;
 
     setMessages(prev => [...prev, { sender: "user", text: input }]);
 
-    const validation = validateInput(step, input);
+    let valid = true;
+    let errorMsg = "";
 
-    if (!validation.valid) {
-      const newAttempts = attempts + 1;
-      setAttempts(newAttempts);
-      
-      if (newAttempts >= maxAttempts) {
-        setTimeout(() => {
-          resetChat();
-        }, 1000);
-      } else {
-        setIsTyping(true);
-        setTimeout(() => {
-          setIsTyping(false);
-          setMessages(prev => [
-            ...prev,
-            { sender: "bot", text: `${validation.error} (Attempt ${newAttempts}/${maxAttempts})` }
-          ]);
-        }, 800);
+    // Validation rules
+    switch (step) {
+      case "pclass":
+        if (![1, 2, 3].includes(parseInt(input))) {
+          valid = false;
+          errorMsg = "Please enter 1, 2, or 3 for class.";
+        }
+        break;
+      case "sex":
+        if (!["male", "female"].includes(input.toLowerCase())) {
+          valid = false;
+          errorMsg = "Please enter 'male' or 'female'.";
+        }
+        break;
+      case "age":
+        if (isNaN(parseFloat(input)) || parseFloat(input) < 0) {
+          valid = false;
+          errorMsg = "Please enter a valid positive number for age.";
+        }
+        break;
+      case "sibsp":
+      case "parch":
+        if (isNaN(parseInt(input)) || parseInt(input) < 0) {
+          valid = false;
+          errorMsg = "Please enter a valid non-negative integer.";
+        }
+        break;
+      case "fare":
+        if (isNaN(parseFloat(input)) || parseFloat(input) < 0 || parseFloat(input) > 512) {
+          valid = false;
+          errorMsg = "Fare should be between 0 and 512.";
+        }
+        break;
+      case "embarked":
+        if (!["c", "q", "s"].includes(input.toLowerCase())) {
+          valid = false;
+          errorMsg = "Please enter C, Q, or S.";
+        }
+        break;
+    }
+
+    // Handle invalid input → receptionist + retry
+    if (!valid && step !== "done") {
+      setAttempts(prev => prev + 1);
+      setIsTyping(true);
+      setTypingSender("receptionist");
+      try {
+        const res = await axios.post(receptionistUrl, { question: input });
+        await new Promise(r => setTimeout(r, 800));
+        setMessages(prev => [
+          ...prev,
+          { sender: "receptionist", text: res.data.answer },
+          { sender: "bot", text: stepPrompts[step] }
+        ]);
+      } catch {
+        await new Promise(r => setTimeout(r, 800));
+        setMessages(prev => [
+          ...prev,
+          { sender: "receptionist", text: "Receptionist unavailable. Let's continue." },
+          { sender: "bot", text: stepPrompts[step] }
+        ]);
       }
+      setIsTyping(false);
+      setTypingSender("bot");
       setInput("");
       return;
     }
 
-    // Valid input
+    // Valid input → continue
     setAttempts(0);
-    const newUserData = { ...userData, [step]: input };
-    setUserData(newUserData);
+    const newUserData = { ...userData };
 
-    const stepOrder = ["name", "pclass", "sex", "age", "sibsp", "parch", "fare", "embarked"];
-    const currentIndex = stepOrder.indexOf(step);
-
-    if (currentIndex < stepOrder.length - 1) {
-      const nextStep = stepOrder[currentIndex + 1];
-      setStep(nextStep);
-      
-      setIsTyping(true);
-      setTimeout(() => {
-        setIsTyping(false);
-        setMessages(prev => [
-          ...prev,
-          { sender: "bot", text: `Great! ${stepPrompts[nextStep]}` }
-        ]);
-      }, 800);
-    } else {
-      // All data collected - simulate prediction
-      setIsTyping(true);
-      setTimeout(() => {
-        setIsTyping(false);
-        const survived = Math.random() > 0.5; // Simulated prediction
-        setMessages(prev => [
-          ...prev,
-          { 
-            sender: "bot", 
-            text: survived 
-              ? `🎉 Good news, ${newUserData.name}! According to our ML model, you would have likely survived the Titanic disaster. The model considered your class, age, gender, and other factors to make this prediction.`
-              : `😔 Unfortunately, ${newUserData.name}, our model predicts you would not have survived the Titanic disaster. The model based this on historical patterns including passenger class, demographics, and other factors.`
-          }
-        ]);
-        toast.success("Prediction complete!");
-      }, 1500);
+    let nextStep = step;
+    switch (step) {
+      case "name":
+        newUserData.name = input;
+        setMessages(prev => [...prev, { sender: "bot", text: `Nice to meet you, ${input}! Which class are you traveling in? (1, 2, or 3)` }]);
+        nextStep = "pclass";
+        break;
+      case "pclass":
+        newUserData.Pclass = parseInt(input);
+        setMessages(prev => [...prev, { sender: "bot", text: "Sex (male/female)?" }]);
+        nextStep = "sex";
+        break;
+      case "sex":
+        newUserData.Sex = input.toLowerCase();
+        setMessages(prev => [...prev, { sender: "bot", text: "Age?" }]);
+        nextStep = "age";
+        break;
+      case "age":
+        newUserData.Age = parseFloat(input);
+        setMessages(prev => [...prev, { sender: "bot", text: "Number of siblings/spouses aboard (SibSp)?" }]);
+        nextStep = "sibsp";
+        break;
+      case "sibsp":
+        newUserData.SibSp = parseInt(input);
+        setMessages(prev => [...prev, { sender: "bot", text: "Number of parents/children aboard (Parch)?" }]);
+        nextStep = "parch";
+        break;
+      case "parch":
+        newUserData.Parch = parseInt(input);
+        setMessages(prev => [...prev, { sender: "bot", text: "Fare? ($0 - $512)" }]);
+        nextStep = "fare";
+        break;
+      case "fare":
+        newUserData.Fare = parseFloat(input);
+        setMessages(prev => [...prev, { sender: "bot", text: "Port of Embarkation (C, Q, S)?" }]);
+        nextStep = "embarked";
+        break;
+      case "embarked":
+        newUserData.Embarked = input.toUpperCase();
+        try {
+          const res = await axios.post(backendUrl, newUserData);
+          const { prediction, survival_probability, explanation } = res.data;
+          await new Promise(r => setTimeout(r, 600));
+          setMessages(prev => [
+            ...prev,
+            { sender: "bot", text: `Prediction: ${prediction === 1 ? "✅ Survived" : "❌ Did not survive"} (Probability: ${(survival_probability * 100).toFixed(2)}%)` },
+            { sender: "bot", text: `Reason: ${explanation.reason}` },
+            { sender: "bot", text: `Suggestion: ${explanation.suggestion}` },
+            { sender: "bot", text: `Fact: ${explanation.fact}` }
+          ]);
+        } catch {
+          setMessages(prev => [...prev, { sender: "bot", text: "Error contacting backend." }]);
+        }
+        nextStep = "done";
+        break;
     }
 
+    setUserData(newUserData);
+    setStep(nextStep);
     setInput("");
   };
 
   return (
     <div className="min-h-screen animated-gradient">
-      <div className="fixed inset-0 opacity-10 wave-animation pointer-events-none">
-        <div className="absolute top-0 left-0 w-[200%] h-[200%] bg-gradient-to-br from-primary via-transparent to-secondary" />
-      </div>
-
       <div className="relative container mx-auto px-4 py-8 max-w-4xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <Link to="/">
             <Button variant="ghost" className="glass hover:glass-strong">
-              <ArrowLeft className="mr-2 w-4 h-4" />
-              Back
+              <ArrowLeft className="mr-2 w-4 h-4" /> Back
             </Button>
           </Link>
-          
+
           <div className="flex items-center gap-3">
             <Ship className="w-8 h-8 text-primary-glow float" />
             <h1 className="text-2xl font-display font-bold text-foreground">
@@ -182,13 +215,8 @@ const Chat = () => {
             </h1>
           </div>
 
-          <Button 
-            variant="ghost" 
-            className="glass hover:glass-strong"
-            onClick={() => resetChat("Let's start fresh!")}
-          >
-            <RotateCcw className="mr-2 w-4 h-4" />
-            Reset
+          <Button variant="ghost" className="glass hover:glass-strong" onClick={() => resetChat("Let's start fresh!")}>
+            <RotateCcw className="mr-2 w-4 h-4" /> Reset
           </Button>
         </div>
 
@@ -196,26 +224,23 @@ const Chat = () => {
         <Card className="glass-strong border-0 shadow-elegant overflow-hidden">
           <ScrollArea className="h-[500px] p-6">
             <div className="space-y-4">
-              {messages.map((msg, index) => (
-                <div
-                  key={index}
-                  className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"} fade-in`}
-                  style={{ animationDelay: `${index * 0.05}s` }}
-                >
+              {messages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
                   <div
-                    className={`max-w-[75%] px-4 py-3 rounded-2xl ${
-                      msg.sender === "user"
-                        ? "bg-gradient-primary text-primary-foreground shadow-glass"
-                        : "bg-gradient-secondary text-secondary-foreground shadow-glass"
-                    }`}
+                    className={`max-w-[75%] px-4 py-3 rounded-2xl ${msg.sender === "user"
+                      ? "bg-gradient-primary text-primary-foreground"
+                      : msg.sender === "receptionist"
+                        ? "bg-purple-600 text-white"
+                        : "bg-gradient-secondary text-secondary-foreground text-black"
+                      }`}
                   >
-                    <p className="text-sm md:text-base">{msg.text}</p>
+                    <p>{msg.text}</p>
                   </div>
                 </div>
               ))}
 
               {isTyping && (
-                <div className="flex justify-start fade-in">
+                <div className="flex justify-start">
                   <div className="bg-muted px-4 py-3 rounded-2xl shadow-glass">
                     <div className="flex gap-1">
                       <div className="w-2 h-2 rounded-full bg-foreground typing-dot" />
@@ -225,44 +250,40 @@ const Chat = () => {
                   </div>
                 </div>
               )}
-
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
-          {/* Input Area */}
-          <div className="p-4 border-t border-border/50">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleUserInput();
-              }}
-              className="flex gap-3"
-            >
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Type your message..."
-                className="flex-1 bg-input border-border focus:ring-primary"
-                disabled={isTyping}
-              />
-              <Button 
-                type="submit" 
-                disabled={!input.trim() || isTyping}
-                className="bg-gradient-accent text-accent-foreground hover:opacity-90 transition-all"
+          {/* Input */}
+          {step !== "done" ? (
+            <div className="p-4 border-t border-border/50">
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleUserInput();
+                }}
+                className="flex gap-3"
               >
-                <Send className="w-4 h-4" />
+                <Input
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  placeholder="Type your message..."
+                  className="flex-1 bg-input"
+                  disabled={isTyping}
+                />
+                <Button type="submit" disabled={!input.trim() || isTyping} className="bg-gradient-accent">
+                  <Send className="w-4 h-4" />
+                </Button>
+              </form>
+            </div>
+          ) : (
+            <div className="p-4 border-t border-border/50 text-center">
+              <Button onClick={() => resetChat("Hello! I'm the Titanic Survival Predictor. What's your name?")}>
+                🔄 Try Once More
               </Button>
-            </form>
-          </div>
+            </div>
+          )}
         </Card>
-
-        {/* Progress Indicator */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Step: <span className="text-primary font-semibold">{step}</span>
-          </p>
-        </div>
       </div>
     </div>
   );
