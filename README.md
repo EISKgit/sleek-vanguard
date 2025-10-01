@@ -3,11 +3,6 @@
 ## Project info
 
 
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-
 **Use your preferred IDE**
 
 If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
