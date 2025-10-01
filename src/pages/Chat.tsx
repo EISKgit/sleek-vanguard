@@ -16,7 +16,7 @@ interface Message {
 const Chat = () => {
   const maxAttempts = 3;
   const [messages, setMessages] = useState<Message[]>([
-    { sender: "bot", text: "Hello! I'm the Titanic Survival Predictor. What's your name?" }
+    { sender: "bot", text: "Hello! I'm Rose, your Titanic Receptionist. To begin, please tell me your name." }
   ]);
   const [input, setInput] = useState("");
   const [userData, setUserData] = useState<Record<string, any>>({});
@@ -180,7 +180,7 @@ const Chat = () => {
           await new Promise(r => setTimeout(r, 600));
           setMessages(prev => [
             ...prev,
-            { sender: "bot", text: `Prediction: ${prediction === 1 ? "✅ Survived" : "❌ Did not survive"} (Probability: ${(survival_probability * 100).toFixed(2)}%)` },
+            { sender: "bot", text: `Prediction: ${prediction === 1 ? "✅ Survived" : "❌ Did not survive"} (Probability: ${(survival_probability * 100).toFixed(0)}%)` },
             { sender: "bot", text: `Reason: ${explanation.reason}` },
             { sender: "bot", text: `Suggestion: ${explanation.suggestion}` },
             { sender: "bot", text: `Fact: ${explanation.fact}` }
@@ -198,7 +198,18 @@ const Chat = () => {
   };
 
   return (
-    <div className="min-h-screen animated-gradient">
+    <div className="relative min-h-screen">
+
+      {/* Titanic Video Background */}
+      <video
+        src="/videos/titanic.mp4"
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="absolute top-0 left-0 w-full h-full object-cover -z-10 opacity-30"
+      />
+
       <div className="relative container mx-auto px-4 py-8 max-w-4xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -211,7 +222,7 @@ const Chat = () => {
           <div className="flex items-center gap-3">
             <Ship className="w-8 h-8 text-primary-glow float" />
             <h1 className="text-2xl font-display font-bold text-foreground">
-              Titanic Predictor
+              Rose – Titanic Receptionist AI
             </h1>
           </div>
 
@@ -221,7 +232,8 @@ const Chat = () => {
         </div>
 
         {/* Chat Container */}
-        <Card className="glass-strong border-0 shadow-elegant overflow-hidden">
+        <Card className="bg-white/5 backdrop-blur-sm border-0 shadow-elegant overflow-hidden">
+
           <ScrollArea className="h-[500px] p-6">
             <div className="space-y-4">
               {messages.map((msg, idx) => (
@@ -230,8 +242,8 @@ const Chat = () => {
                     className={`max-w-[75%] px-4 py-3 rounded-2xl ${msg.sender === "user"
                       ? "bg-gradient-primary text-primary-foreground"
                       : msg.sender === "receptionist"
-                        ? "bg-purple-600 text-white"
-                        : "bg-gradient-secondary text-secondary-foreground text-black"
+                        ? "bg-orange-500 text-white"
+                        : "bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 text-slate-100"
                       }`}
                   >
                     <p>{msg.text}</p>
